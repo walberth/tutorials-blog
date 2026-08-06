@@ -1,0 +1,43 @@
+{
+  "name": "sqlserver-clientes-connector",
+  "config": {
+    "//_class": "Clase del plugin Debezium para SQL Server (viene en la imagen debezium/connect).",
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+
+    "//_tasks": "SQL Server solo soporta 1 task por connector.",
+    "tasks.max": "1",
+
+    "//_conn": "Conexión a la BD. 'sqlserver' es el NOMBRE del servicio en docker-compose (host interno).",
+    "database.hostname": "sqlserver",
+    "database.port": "1433",
+    "database.user": "sa",
+    "database.password": "Passw0rd!Strong",
+
+    "//_encrypt": "SQL Server 2022 exige TLS por defecto; lo desactivamos para la demo local.",
+    "database.encrypt": "false",
+    "database.trustServerCertificate": "true",
+
+    "//_names": "Debezium 2.x usa 'database.names' (plural). BD a capturar.",
+    "database.names": "DemoCDC",
+
+    "//_prefix": "Prefijo de los topics. El topic final será: <prefix>.<db>.<schema>.<tabla>",
+    "//_prefix2": "=> sqlserver.DemoCDC.dbo.Clientes",
+    "topic.prefix": "sqlserver",
+
+    "//_include": "Qué tablas capturar (schema.tabla). Puedes listar varias separadas por coma.",
+    "table.include.list": "dbo.Clientes",
+
+    "//_snapshot": "'initial' = primero snapshot de datos existentes (op='r'), luego streaming de cambios.",
+    "snapshot.mode": "initial",
+
+    "//_history": "Debezium guarda el historial de cambios de schema en un topic interno de Kafka.",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
+    "schema.history.internal.kafka.topic": "schemahistory.sqlserver.demo",
+
+    "//_tombstone": "Emitir tombstone (value=null) tras un DELETE. Útil para log compaction.",
+    "tombstones.on.delete": "true",
+
+    "//_decimal": "Cómo representar DECIMAL/NUMERIC. 'double' es lo más legible para una demo.",
+    "decimal.handling.mode": "double"
+  }
+}

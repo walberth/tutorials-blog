@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CDC Live Feed — SQL Server → Debezium → Kafka</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="bg-glow"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <div>
+        <h1>CDC Live Feed</h1>
+        <p class="subtitle">SQL Server → Debezium → Kafka → WebSocket</p>
+      </div>
+    </div>
+
+    <div class="conn-status" id="connStatus">
+      <span class="conn-dot" id="connDot"></span>
+      <span id="connLabel">Conectando…</span>
+    </div>
+  </header>
+
+  <section class="stats">
+    <div class="stat-card stat-total">
+      <span class="stat-value" id="statTotal">0</span>
+      <span class="stat-label">Total eventos</span>
+    </div>
+    <div class="stat-card stat-read">
+      <span class="stat-value" id="statRead">0</span>
+      <span class="stat-label">Snapshot</span>
+    </div>
+    <div class="stat-card stat-create">
+      <span class="stat-value" id="statCreate">0</span>
+      <span class="stat-label">Inserts</span>
+    </div>
+    <div class="stat-card stat-update">
+      <span class="stat-value" id="statUpdate">0</span>
+      <span class="stat-label">Updates</span>
+    </div>
+    <div class="stat-card stat-delete">
+      <span class="stat-value" id="statDelete">0</span>
+      <span class="stat-label">Deletes</span>
+    </div>
+  </section>
+
+  <section class="chart-wrap">
+    <canvas id="activityChart" height="70"></canvas>
+    <span class="chart-caption">Eventos por segundo (últimos 60s)</span>
+  </section>
+
+  <main class="feed-wrap">
+    <div class="feed-header">
+      <h2>Eventos en vivo</h2>
+      <span class="feed-hint">Topic: <code id="topicName">—</code></span>
+    </div>
+    <div id="feed" class="feed"></div>
+    <div id="emptyState" class="empty-state">
+      <p>Esperando eventos… ejecuta un INSERT/UPDATE/DELETE en SQL Server o espera el snapshot inicial.</p>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

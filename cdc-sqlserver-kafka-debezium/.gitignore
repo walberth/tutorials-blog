@@ -1,0 +1,21 @@
+# Variables de entorno reales (contienen secretos) — nunca subir a git.
+.env
+.env.*
+!.env.example
+
+# Dependencias instaladas localmente dentro de subproyectos.
+node_modules/
+
+# Datos persistentes de los contenedores si se montan como bind-mount local.
+data/
+volumes/
+
+# Configuración local de herramientas/editor.
+.claude/
+.vscode/
+.idea/
+
+# Artefactos varios de sistema operativo / editor.
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,230 @@
+# =============================================================================
+#  docker-compose.yml
+#  Demo: SQL Server -> Kafka Connect (Debezium) -> Kafka -> Kafka UI
+# -----------------------------------------------------------------------------
+#  Levanta TODA la infraestructura de la demo con un solo comando:
+#
+#      docker compose up -d
+#
+#  Servicios:
+#    - sqlserver  : base de datos origen con CDC habilitado
+#    - kafka      : broker Kafka en modo KRaft (sin Zookeeper)
+#    - connect    : Kafka Connect con el connector Debezium para SQL Server
+#    - kafka-ui   : interfaz web para ver topics, mensajes y connectors
+#    - web-viewer : streaming en vivo de eventos CDC vía WebSocket (custom)
+#
+#  Todos comparten la red "cdc-net" y se resuelven por su NOMBRE de servicio
+#  (p. ej. "kafka", "sqlserver"). Ese nombre es el hostname DENTRO de la red
+#  de Docker — por eso el connector apunta a "sqlserver" y no a "localhost".
+# =============================================================================
+
+# 'name' fija el prefijo del proyecto (contenedores, red, volúmenes).
+name: cdc-sqlserver-kafka-debezium
+
+services:
+
+  # ===========================================================================
+  # 1) SQL SERVER  —  Base de datos ORIGEN (source)
+  # ===========================================================================
+  # Es la fuente de datos. Aquí crearemos la BD "DemoCDC", la tabla "Clientes"
+  # y habilitaremos CDC (Change Data Capture). Debezium leerá de las tablas de
+  # sistema de CDC para detectar INSERT/UPDATE/DELETE.
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: cdc-sqlserver
+    hostname: sqlserver
+    ports:
+      # host:container  -> conéctate desde SSMS / Azure Data Studio a localhost:1433
+      - "${MSSQL_HOST_PORT:-1433}:1433"
+    environment:
+      ACCEPT_EULA: "Y"                                # obligatorio para arrancar la imagen
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}"
+      MSSQL_PID: "${MSSQL_PID:-Developer}"            # edición Developer: gratis y con CDC
+      # SQL Agent es OBLIGATORIO para CDC: los "capture jobs" corren sobre el Agent.
+      MSSQL_AGENT_ENABLED: "true"
+    volumes:
+      # Persistimos los datos del motor para no perder la BD al reiniciar.
+      - sqlserver-data:/var/opt/mssql
+      # Montamos los scripts SQL DENTRO del contenedor (solo lectura) para poder
+      # aplicarlos con sqlcmd:  docker compose exec sqlserver ... -i /sql/01-init.sql
+      - ./sql:/sql:ro
+    healthcheck:
+      # Consideramos "healthy" cuando sqlcmd puede autenticarse y ejecutar "SELECT 1".
+      # -C = confiar en el certificado autofirmado; -N = cifrar conexión (SQL 2022 lo pide).
+      test: >
+        /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa
+        -P "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}" -C -N -Q "SELECT 1" -b -o /dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - cdc-net
+
+  # ===========================================================================
+  # 2) KAFKA  —  Broker de mensajería (modo KRaft, SIN Zookeeper)
+  # ===========================================================================
+  # Un único contenedor actúa a la vez como "broker" y "controller".
+  # Aquí se crean los topics donde Debezium publica los eventos de cambio.
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: cdc-kafka
+    hostname: kafka
+    ports:
+      # Listener externo: para herramientas en TU máquina (localhost:9092).
+      - "${KAFKA_HOST_PORT:-9092}:9092"
+    environment:
+      # ---- Identidad y roles KRaft ----
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"        # este nodo hace ambas cosas
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:29093"
+      # CLUSTER_ID formatea el almacenamiento KRaft de forma reproducible.
+      CLUSTER_ID: "${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}"
+
+      # ---- Listeners ----
+      # Definimos 3 "puertas de entrada":
+      #   PLAINTEXT       (29092) -> tráfico ENTRE contenedores (connect, kafka-ui)
+      #   CONTROLLER      (29093) -> plano de control interno de KRaft
+      #   PLAINTEXT_HOST  (9092)  -> clientes en el host (fuera de Docker)
+      KAFKA_LISTENERS: "PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      # ---- Factores de replicación = 1 (demo de un solo broker) ----
+      # En PRODUCCIÓN estos valores serían >= 3. Aquí 1 porque hay un único nodo.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0       # arranque de consumidores más rápido
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"         # cómodo para la demo
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      # "healthy" cuando el broker responde a una consulta de la API de administración.
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - cdc-net
+
+  # ===========================================================================
+  # 3) KAFKA CONNECT + DEBEZIUM  —  El "puente" CDC
+  # ===========================================================================
+  # Ejecuta el framework Kafka Connect con el plugin Debezium para SQL Server.
+  # Expone una API REST (8083) donde registramos el connector con un JSON.
+  # Una vez registrado, hace el snapshot inicial y luego streamea los cambios.
+  connect:
+    image: debezium/connect:2.7.3.Final
+    container_name: cdc-connect
+    hostname: connect
+    depends_on:
+      kafka:
+        condition: service_healthy       # no arranca hasta que Kafka esté listo
+      sqlserver:
+        condition: service_healthy       # ni hasta que SQL Server acepte conexiones
+    ports:
+      - "${CONNECT_HOST_PORT:-8083}:8083" # API REST -> http://localhost:8083
+    environment:
+      # A qué Kafka se conecta (nombre interno del servicio + puerto interno).
+      BOOTSTRAP_SERVERS: "kafka:29092"
+      # ID del grupo del cluster de Connect (identifica a este worker).
+      GROUP_ID: "cdc-connect-cluster"
+      # Topics internos donde Connect guarda su propio estado (config/offsets/status).
+      CONFIG_STORAGE_TOPIC: "connect_configs"
+      OFFSET_STORAGE_TOPIC: "connect_offsets"
+      STATUS_STORAGE_TOPIC: "connect_statuses"
+      # Replicación 1 para esos topics internos (un solo broker).
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # Convertidores: cómo se serializan clave y valor de los mensajes.
+      # Usamos JSON (legible en Kafka UI). "schemas.enable=true" incluye el schema
+      # dentro de cada mensaje — útil para entender la estructura en la demo.
+      KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "true"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "true"
+    healthcheck:
+      # "healthy" cuando la API REST responde 200 en la raíz.
+      test: ["CMD", "curl", "-f", "http://localhost:8083/"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks:
+      - cdc-net
+
+  # ===========================================================================
+  # 4) KAFKA UI  —  Interfaz web de observabilidad
+  # ===========================================================================
+  # Panel para navegar topics, leer mensajes y ver el estado de los connectors.
+  # Abrir en:  http://localhost:8080
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: cdc-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+      connect:
+        condition: service_healthy
+    ports:
+      - "${KAFKA_UI_HOST_PORT:-8080}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "local-cdc"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:29092"
+      # Registramos la API de Kafka Connect para verla desde la UI.
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: "debezium"
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: "http://connect:8083"
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks:
+      - cdc-net
+
+  # ===========================================================================
+  # 5) WEB VIEWER  —  Streaming en vivo de los eventos CDC en el navegador
+  # ===========================================================================
+  # Servicio propio (./web-viewer) que consume el topic de Kafka y retransmite
+  # cada evento por WebSocket a una página web con animaciones y contadores.
+  # No forma parte del pipeline CDC en sí: es "un consumidor más" de Kafka,
+  # pensado para presentar la demo de forma visual. Ver web-viewer/README.md.
+  web-viewer:
+    build:
+      context: ./web-viewer
+    container_name: cdc-web-viewer
+    # El topic de Debezium puede no existir todavía cuando este servicio arranca
+    # (el connector se registra en un paso aparte). Sin esto, un fallo de
+    # suscripción hace process.exit(1) y el contenedor se queda muerto.
+    restart: on-failure
+    depends_on:
+      kafka:
+        condition: service_healthy
+      connect:
+        condition: service_healthy
+    ports:
+      # Abrir en el navegador -> http://localhost:3000
+      - "${WEB_VIEWER_HOST_PORT:-3000}:3000"
+    environment:
+      KAFKA_BROKER: "kafka:29092"
+      KAFKA_TOPIC: "sqlserver.DemoCDC.dbo.Clientes"
+      KAFKA_GROUP_ID: "cdc-web-viewer-group"
+      PORT: "3000"
+    networks:
+      - cdc-net
+
+# =============================================================================
+#  RED  —  Todos los servicios se comunican por aquí y se resuelven por nombre.
+# =============================================================================
+networks:
+  cdc-net:
+    driver: bridge
+
+# =============================================================================
+#  VOLÚMENES  —  Persistencia de datos entre reinicios de contenedores.
+#  Para BORRAR todo (empezar de cero):  docker compose down -v
+# =============================================================================
+volumes:
+  sqlserver-data:
+  kafka-data:

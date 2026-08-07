@@ -48,7 +48,7 @@ VALUES
         N'demo' + @suffix + N'@example.com',
         CASE
             WHEN ABS(CHECKSUM(NEWID())) % 100 < 85 THEN N'ACTIVO'
-            ELSE N'INACTIVO'
+            ELSE N 'INACTIVO'
         END
     );
 
@@ -68,7 +68,7 @@ UPDATE
 SET
     Estado = CASE
         Estado
-        WHEN N'ACTIVO' THEN N'INACTIVO'
+        WHEN N'ACTIVO' THEN N 'INACTIVO'
         ELSE N'ACTIVO'
     END,
     FechaActualizacion = SYSUTCDATETIME()

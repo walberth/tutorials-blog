@@ -15,6 +15,9 @@ volumes/
 .vscode/
 .idea/
 
+# Documentación local fuera del alcance del repositorio.
+docs/
+
 # Artefactos varios de sistema operativo / editor.
 .DS_Store
 Thumbs.db

@@ -1,6 +1,7 @@
-# tutorials-blog
+# Coding With No Try/Catch | Demos y documentación
 
-Repositorio base para las demos técnicas que acompañan los posts del blog.
+Repositorio base para las demos técnicas y la documentación que acompañan los
+posts de [Coding With No Try/Catch](https://codingwithnotrycatch.com/).
 
 La idea de este README es servir como portada e índice del repositorio. Cada
 demo vive en su propia carpeta y mantiene su propio README con el detalle de

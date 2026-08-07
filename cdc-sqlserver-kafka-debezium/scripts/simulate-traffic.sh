@@ -62,13 +62,13 @@ run_step() {
   if command -v winpty >/dev/null 2>&1 && [[ "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == mingw* ]]; then
     env DOCKER_CLI_HINTS=false MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
       winpty docker exec -it cdc-sqlserver //opt/mssql-tools18/bin/sqlcmd \
-      -S localhost -d DemoCDC -U sa -P "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}" -C -N \
+      -S localhost -d DemoCDC -U sa -P "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}" -C -N -b \
       -h -1 -W \
       -v Step="${step}" -v Total="${EVENTS}" -v MinRows="${MIN_ROWS}" \
       -i //sql/06-simulate-traffic.sql
   else
     DOCKER_CLI_HINTS=false MSYS_NO_PATHCONV=1 docker exec -i cdc-sqlserver /opt/mssql-tools18/bin/sqlcmd \
-      -S localhost -d DemoCDC -U sa -P "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}" -C -N \
+      -S localhost -d DemoCDC -U sa -P "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}" -C -N -b \
       -h -1 -W \
       -v Step="${step}" -v Total="${EVENTS}" -v MinRows="${MIN_ROWS}" \
       -i /sql/06-simulate-traffic.sql

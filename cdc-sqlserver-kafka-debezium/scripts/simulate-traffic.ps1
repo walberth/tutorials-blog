@@ -35,7 +35,7 @@ Write-Host ""
 
 for ($step = 1; $step -le $Events; $step++) {
     docker exec -i cdc-sqlserver /opt/mssql-tools18/bin/sqlcmd `
-        -S localhost -d DemoCDC -U sa -P $SaPassword -C -N `
+        -S localhost -d DemoCDC -U sa -P $SaPassword -C -N -b `
         -h -1 -W `
         -v Step=$step -v Total=$Events -v MinRows=$MinRows `
         -i /sql/06-simulate-traffic.sql

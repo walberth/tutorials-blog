@@ -11,16 +11,20 @@
 #      ./scripts/simulate-traffic.ps1 -Events 1000 -DelayMs 200
 #      ./scripts/simulate-traffic.ps1 -Events 5000 -DelayMs 0   # ritmo máximo (carga)
 #
+#  Nota:
+#      El piso mínimo de filas queda fijo en 1 para evitar vaciar por completo
+#      la tabla durante la simulación.
+#
 #  Ctrl+C detiene la simulación en cualquier momento (cancela la sesión SQL).
 # =============================================================================
 param(
     [int]$Events = 200,
-    [int]$DelayMs = 500,
-    [int]$MinRows = 3
+    [int]$DelayMs = 500
 )
 
 $ErrorActionPreference = "Stop"
 $env:DOCKER_CLI_HINTS = "false"
+$MinRows = 1
 
 $SaPassword = if ($env:MSSQL_SA_PASSWORD) { $env:MSSQL_SA_PASSWORD } else { "Passw0rd!Strong" }
 

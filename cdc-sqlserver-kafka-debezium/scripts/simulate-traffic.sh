@@ -15,7 +15,10 @@
 #  Argumentos:
 #      $1 = número de eventos   (default 200)
 #      $2 = pausa entre eventos en milisegundos (default 500)
-#      $3 = piso mínimo de filas, no se borra por debajo de este número (default 3)
+#
+#  Nota:
+#      El piso mínimo de filas queda fijo en 1 para evitar vaciar por completo
+#      la tabla durante la simulación.
 #
 #  Ctrl+C detiene la simulación en cualquier momento (cancela la sesión SQL).
 # =============================================================================
@@ -23,14 +26,20 @@ set -euo pipefail
 
 EVENTS="${1:-200}"
 DELAY_MS="${2:-500}"
-MIN_ROWS="${3:-3}"
+MIN_ROWS="1"
 
 usage() {
-  echo "Uso: ./scripts/simulate-traffic.sh [events] [delay_ms] [min_rows]" >&2
-  echo "Ejemplo: ./scripts/simulate-traffic.sh 20 2000 3" >&2
+  echo "Uso: ./scripts/simulate-traffic.sh [events] [delay_ms]" >&2
+  echo "Ejemplo: ./scripts/simulate-traffic.sh 20 2000" >&2
 }
 
-for value in "${EVENTS}" "${DELAY_MS}" "${MIN_ROWS}"; do
+if (( $# > 2 )); then
+  echo ">> ERROR: este script solo acepta [events] y [delay_ms]." >&2
+  usage
+  exit 1
+fi
+
+for value in "${EVENTS}" "${DELAY_MS}"; do
   if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
     echo ">> ERROR: todos los argumentos deben ser numéricos." >&2
     usage

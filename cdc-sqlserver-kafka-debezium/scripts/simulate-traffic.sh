@@ -25,17 +25,56 @@ EVENTS="${1:-200}"
 DELAY_MS="${2:-500}"
 MIN_ROWS="${3:-3}"
 
+usage() {
+  echo "Uso: ./scripts/simulate-traffic.sh [events] [delay_ms] [min_rows]" >&2
+  echo "Ejemplo: ./scripts/simulate-traffic.sh 20 2000 3" >&2
+}
+
+for value in "${EVENTS}" "${DELAY_MS}" "${MIN_ROWS}"; do
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    echo ">> ERROR: todos los argumentos deben ser numéricos." >&2
+    usage
+    exit 1
+  fi
+done
+
 DELAY_SEC=$(( DELAY_MS / 1000 ))
 DELAY_REM_MS=$(( DELAY_MS % 1000 ))
-DELAY_LITERAL=$(printf "00:00:%02d.%03d" "${DELAY_SEC}" "${DELAY_REM_MS}")
+SLEEP_SECONDS=$(printf "%d.%03d" "${DELAY_SEC}" "${DELAY_REM_MS}")
 
 echo ">> Simulando ${EVENTS} eventos (insert/update/delete) con ~${DELAY_MS}ms entre cada uno..."
 echo ">> Abre Kafka UI (http://localhost:8080) y web-viewer (http://localhost:3000) antes de arrancar."
 echo ">> Ctrl+C para detener en cualquier momento."
 echo
 
-# MSYS_NO_PATHCONV evita que Git Bash reescriba "/opt/..." como ruta de Windows.
-MSYS_NO_PATHCONV=1 docker exec -it cdc-sqlserver /opt/mssql-tools18/bin/sqlcmd \
-  -S localhost -U sa -P "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}" -C -N \
-  -v Events="${EVENTS}" -v Delay="${DELAY_LITERAL}" -v MinRows="${MIN_ROWS}" \
-  -i /sql/06-simulate-traffic.sql
+run_step() {
+  local step="$1"
+
+  if command -v winpty >/dev/null 2>&1 && [[ "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == mingw* ]]; then
+    env DOCKER_CLI_HINTS=false MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+      winpty docker exec -it cdc-sqlserver //opt/mssql-tools18/bin/sqlcmd \
+      -S localhost -d DemoCDC -U sa -P "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}" -C -N \
+      -h -1 -W \
+      -v Step="${step}" -v Total="${EVENTS}" -v MinRows="${MIN_ROWS}" \
+      -i //sql/06-simulate-traffic.sql
+  else
+    DOCKER_CLI_HINTS=false MSYS_NO_PATHCONV=1 docker exec -i cdc-sqlserver /opt/mssql-tools18/bin/sqlcmd \
+      -S localhost -d DemoCDC -U sa -P "${MSSQL_SA_PASSWORD:-Passw0rd!Strong}" -C -N \
+      -h -1 -W \
+      -v Step="${step}" -v Total="${EVENTS}" -v MinRows="${MIN_ROWS}" \
+      -i /sql/06-simulate-traffic.sql
+  fi
+}
+
+if command -v winpty >/dev/null 2>&1 && [[ "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == mingw* ]]; then
+  echo ">> Entorno Windows detectado: usando winpty para mostrar progreso en vivo."
+fi
+
+for step in $(seq 1 "${EVENTS}"); do
+  run_step "${step}"
+  if (( step < EVENTS )) && (( DELAY_MS > 0 )); then
+    sleep "${SLEEP_SECONDS}"
+  fi
+done
+
+echo ">> 06-simulate-traffic.sql completado: ${EVENTS} eventos generados."

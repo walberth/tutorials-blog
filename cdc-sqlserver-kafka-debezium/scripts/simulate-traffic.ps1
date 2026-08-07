@@ -14,16 +14,13 @@
 #  Ctrl+C detiene la simulación en cualquier momento (cancela la sesión SQL).
 # =============================================================================
 param(
-    [int]$Events  = 200,
+    [int]$Events = 200,
     [int]$DelayMs = 500,
     [int]$MinRows = 3
 )
 
 $ErrorActionPreference = "Stop"
-
-$DelaySec     = [math]::Floor($DelayMs / 1000)
-$DelayRemMs   = $DelayMs % 1000
-$DelayLiteral = "00:00:{0:D2}.{1:D3}" -f $DelaySec, $DelayRemMs
+$env:DOCKER_CLI_HINTS = "false"
 
 $SaPassword = if ($env:MSSQL_SA_PASSWORD) { $env:MSSQL_SA_PASSWORD } else { "Passw0rd!Strong" }
 
@@ -32,7 +29,16 @@ Write-Host ">> Abre Kafka UI (http://localhost:8080) y web-viewer (http://localh
 Write-Host ">> Ctrl+C para detener en cualquier momento."
 Write-Host ""
 
-docker exec -it cdc-sqlserver /opt/mssql-tools18/bin/sqlcmd `
-    -S localhost -U sa -P $SaPassword -C -N `
-    -v Events=$Events -v Delay=$DelayLiteral -v MinRows=$MinRows `
-    -i /sql/06-simulate-traffic.sql
+for ($step = 1; $step -le $Events; $step++) {
+    docker exec -i cdc-sqlserver /opt/mssql-tools18/bin/sqlcmd `
+        -S localhost -d DemoCDC -U sa -P $SaPassword -C -N `
+        -h -1 -W `
+        -v Step=$step -v Total=$Events -v MinRows=$MinRows `
+        -i /sql/06-simulate-traffic.sql
+
+    if ($step -lt $Events -and $DelayMs -gt 0) {
+        Start-Sleep -Milliseconds $DelayMs
+    }
+}
+
+Write-Host ">> 06-simulate-traffic.sql completado: $Events eventos generados."
